@@ -1,0 +1,75 @@
+#!/usr/bin/ruby
+require 'colorize'
+require_relative 'helpers'
+require_relative 'nginx_config'
+require_relative 'php_fpm_config'
+
+base = '/root'
+nginx_configs_path = '/etc/nginx/sites-available/'
+php_fpm_path = '/etc/php5/fpm/pool.d/'
+if ARGV.length < 2
+  print <<EOS
+Ruby Create Domain script for php-fpm and nginx environment
+usage: create_domain.rb [domain_name] [user_name]       create domain
+EOS
+  exit
+end
+
+domain_name = ARGV[0]
+user_name = ARGV[1]
+user_password = generate_password
+folder_name = domain_name.gsub(/[\.\x00\/\\:\*\?\"<>\|-]/, '_')
+
+print_colorized ["Username: ", user_name.green, " Password: ", user_password.green]
+database_password =  generate_password
+print_colorized ["Database Username: ", user_name.green ," Database Name: ", user_name.green, " DataBase password: ", database_password.green ]
+
+execute_shell("Creating account for user: '#{user_name}' ") do 
+  %x{ useradd #{user_name} -m 2> /dev/null }
+end
+
+execute_shell("Changing user password for user: '#{user_name}'") do
+  %x{ echo #{user_name}:#{user_password} | chpasswd }
+end
+
+execute_shell("Creating Nginx config.", true) do
+  nginx_config = generate_nginx_config domain_name, user_name
+  nginx_config_file = [nginx_configs_path, user_name].join
+  File.open(nginx_config_file, 'w') { |file| file.write(nginx_config) }
+end
+
+execute_shell("Creating Php Fpm Config.", true) do
+  config = generate_php_fpm_config domain_name, user_name
+  config_file_name = [php_fpm_path, user_name, '.conf'].join
+  File.open(config_file_name, 'w') { |file| file.write(config) }
+end
+
+execute_shell("Creating Local Php Config.", true) do
+  config = generate_php_local_file domain_name, user_name
+  config_file_name = ['/home/', user_name, '/php/php.pool.conf'].join
+  File.open(config_file_name, 'w') { |file| file.write(config) }
+end
+
+
+execute_shell("Creating database. ") do
+ %x{ mysql -uroot -e "create database #{user_name};grant all on #{user_name}.* to #{user_name}@localhost identified by '#{user_name}';" -p }
+end
+
+execute_shell("Setting access rights on directory ") do
+  %x{ chmod -R 755 /home/#{user_name} }
+end
+
+execute_shell("Setting owner on directory. ") do
+  %x{ chown -R #{user_name}:#{user_name} /home/#{user_name} }
+end
+
+execute_shell("Reloading nginx. ") do
+  %x{ service nginx reload }
+end
+
+execute_shell("Reloading php-fpm. ") do
+  %x{ service php5-fpm restart }
+end
+
+
+
